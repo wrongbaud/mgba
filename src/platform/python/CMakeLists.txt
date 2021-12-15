@@ -40,7 +40,7 @@ add_custom_target(${BINARY_NAME}-py ALL
                   DEPENDS ${BINARY_NAME}-pylib)
 
 add_custom_target(${BINARY_NAME}-py-install
-                  COMMAND BINDIR=${CMAKE_CURRENT_BINARY_DIR}/.. LIBDIR=${CMAKE_CURRENT_BINARY_DIR}/.. CPPFLAGS="${INCLUDE_FLAGS}" ${PYTHON_EXECUTABLE} setup.py install -b ${CMAKE_CURRENT_BINARY_DIR}
+                  COMMAND BINDIR=${CMAKE_CURRENT_BINARY_DIR}/.. LIBDIR=${CMAKE_CURRENT_BINARY_DIR}/.. CPPFLAGS="${INCLUDE_FLAGS}" ${PYTHON_EXECUTABLE} setup.py install
                   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
                   DEPENDS ${BINARY_NAME}-py)
 
