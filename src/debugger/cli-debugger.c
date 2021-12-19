@@ -26,6 +26,11 @@
 #include <pthread.h>
 #endif
 
+// Additional includes for Ghidra Tracing
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <string.h>
+
 const char* ERROR_MISSING_ARGS = "Arguments missing"; // TODO: share
 const char* ERROR_OVERFLOW = "Arguments overflow";
 const char* ERROR_INVALID_ARGS = "Invalid arguments";
@@ -76,6 +81,9 @@ static void _finish(struct CLIDebugger*, struct CLIDebugVector*);
 static void _setStackTraceMode(struct CLIDebugger*, struct CLIDebugVector*);
 static void _setSymbol(struct CLIDebugger*, struct CLIDebugVector*);
 static void _findSymbol(struct CLIDebugger*, struct CLIDebugVector*);
+// Wrongbaud - tracing modifications
+static void _ghidraTrace(struct CLIDebugger*, struct CLIDebugVector*);
+
 
 static struct CLIDebuggerCommandSummary _debuggerCommands[] = {
 	{ "backtrace", _backtrace, "i", "Print backtrace of all or specified frames" },
@@ -113,6 +121,8 @@ static struct CLIDebuggerCommandSummary _debuggerCommands[] = {
 	{ "x/1", _dumpByte, "Ii", "Examine bytes at a specified offset" },
 	{ "x/2", _dumpHalfword, "Ii", "Examine halfwords at a specified offset" },
 	{ "x/4", _dumpWord, "Ii", "Examine words at a specified offset" },
+	{ "gt", _ghidraTrace, "Ii", "Begin Ghidra tracing utility at specified port" },
+
 #ifdef ENABLE_SCRIPTING
 	{ "source", _source, "S", "Load a script" },
 #endif
@@ -715,6 +725,55 @@ static void _listWatchpoints(struct CLIDebugger* debugger, struct CLIDebugVector
 	mWatchpointListDeinit(&watchpoints);
 }
 
+uint32_t portNum = 1111;
+uint32_t server_fd, new_socket, valread;
+struct sockaddr_in address;
+
+static void _ghidraTrace(struct CLIDebugger* debugger, struct CLIDebugVector* dv) {
+	if (!dv || dv->type != CLIDV_INT_TYPE) {
+		debugger->backend->printf(debugger->backend, "%s\n", ERROR_MISSING_ARGS);
+		return;
+	}
+	portNum = dv->intValue;
+	int opt = 1;
+	int addrlen = sizeof(address);
+	char buffer[1024] = {0};
+	char *hello = "GHIDRA_SRV_WB";
+	debugger->backend->printf(debugger->backend,"Launging Ghidra Trace Server at port %d\n",portNum);
+	// Connect to client
+	if((server_fd = socket(AF_INET,SOCK_STREAM,0)) == 0){
+		debugger->backend->printf(debugger->backend,"Error creating socket");
+		return;
+	}
+	if(setsockopt(server_fd,SOL_SOCKET,SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt))){
+		debugger->backend->printf(debugger->backend,"Error setting socket options...");
+		return;
+	}
+	address.sin_family = AF_INET;
+	address.sin_addr.s_addr = INADDR_ANY;
+	address.sin_port = htons(portNum);
+	if (bind(server_fd,(struct sockaddr*)&address,sizeof(address))<0){
+		debugger->backend->printf(debugger->backend,"Bind failed...");
+		return;
+	}
+
+	if(listen(server_fd,3)<0){
+		debugger->backend->printf(debugger->backend,"Listen failed...");
+		return;
+	}
+
+	if((new_socket = accept(server_fd,(struct sockaddr*)&address,(socklen_t*)&addrlen))<0){
+		debugger->backend->printf(debugger->backend,"Accept failed...");
+		return;
+	}		
+	debugger->backend->printf(debugger->backend,"Sending data...\n");
+	send(new_socket,hello,strlen(hello),0);
+	debugger->backend->printf(debugger->backend,"Done sending data...\n");
+	return;
+
+}
+
+
 static void _trace(struct CLIDebugger* debugger, struct CLIDebugVector* dv) {
 	if (!dv || dv->type != CLIDV_INT_TYPE) {
 		debugger->backend->printf(debugger->backend, "%s\n", ERROR_MISSING_ARGS);
@@ -738,21 +797,36 @@ static void _trace(struct CLIDebugger* debugger, struct CLIDebugVector* dv) {
 		debugger->system->printStatus(debugger->system);
 	}
 }
-
+/*
+struct mDebuggerPlatform* ARMDebuggerPlatformCreate(void) {
+	struct mDebuggerPlatform* platform = (struct mDebuggerPlatform*) malloc(sizeof(struct ARMDebugger));
+	platform->entered = ARMDebuggerEnter;
+	platform->init = ARMDebuggerInit;
+	platform->deinit = ARMDebuggerDeinit;
+	platform->setBreakpoint = ARMDebuggerSetBreakpoint;
+	platform->listBreakpoints = ARMDebuggerListBreakpoints;
+	platform->clearBreakpoint = ARMDebuggerClearBreakpoint;
+	platform->setWatchpoint = ARMDebuggerSetWatchpoint;
+	platform->listWatchpoints = ARMDebuggerListWatchpoints;
+	platform->checkBreakpoints = ARMDebuggerCheckBreakpoints;
+	platform->hasBreakpoints = ARMDebuggerHasBreakpoints;
+	platform->trace = ARMDebuggerTrace;
+	platform->getRegister = ARMDebuggerGetRegister;
+	platform->setRegister = ARMDebuggerSetRegister;
+	platform->getStackTraceMode = ARMDebuggerGetStackTraceMode;
+	platform->setStackTraceMode = ARMDebuggerSetStackTraceMode;
+	platform->updateStackTrace = ARMDebuggerUpdateStackTrace;
+	return platform;
+}
+*/
 static bool _doTrace(struct CLIDebugger* debugger) {
-	char trace[1024];
-	trace[sizeof(trace) - 1] = '\0';
-	size_t traceSize = sizeof(trace) - 2;
-	debugger->d.platform->trace(debugger->d.platform, trace, &traceSize);
-	if (traceSize + 2 <= sizeof(trace)) {
-		trace[traceSize] = '\n';
-		trace[traceSize + 1] = '\0';
-	}
-	if (debugger->traceVf) {
-		debugger->traceVf->write(debugger->traceVf, trace, traceSize + 1);
-	} else {
-		debugger->backend->printf(debugger->backend, "%s", trace);
-	}
+	int32_t reg_value;
+	// We can modify this to just get and return PC instead of all the trace information.
+	debugger->d.platform->getRegister(debugger->d.platform, "pc", &reg_value);
+	//Here we will just eventually write to the socket instead of printing...
+	int32_t r = htonl(reg_value);
+	send(new_socket,&r,sizeof(r),0);
+	//debugger->backend->printf(debugger->backend, "%d\n", reg_value);
 	if (debugger->traceRemaining > 0) {
 		--debugger->traceRemaining;
 	}

@@ -79,7 +79,7 @@ void mDebuggerAttach(struct mDebugger* debugger, struct mCore* core) {
 	debugger->platform->p = debugger;
 	core->attachDebugger(core, debugger);
 }
-
+uint32_t count = 0;
 void mDebuggerRun(struct mDebugger* debugger) {
 	switch (debugger->state) {
 	case DEBUGGER_RUNNING:
@@ -92,8 +92,11 @@ void mDebuggerRun(struct mDebugger* debugger) {
 		break;
 	case DEBUGGER_CALLBACK:
 		debugger->core->step(debugger->core);
-		debugger->platform->checkBreakpoints(debugger->platform);
-		debugger->custom(debugger);
+		//debugger->platform->checkBreakpoints(debugger->platform);
+		if(count % 25 == 0){
+			debugger->custom(debugger);
+		}
+		count += 1;
 		break;
 	case DEBUGGER_PAUSED:
 		if (debugger->paused) {
